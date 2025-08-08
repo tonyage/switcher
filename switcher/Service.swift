@@ -5,7 +5,7 @@
 //  Created by Tony Do on 7/16/25.
 //
 
-import Combine
+@preconcurrency import Combine
 import CoreAudio
 import CoreAudio.AudioHardware
 
