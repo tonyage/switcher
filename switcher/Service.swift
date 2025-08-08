@@ -24,7 +24,7 @@ final class AudioDeviceService: ObservableObject {
     
     private let listener: AudioHardwareListener
     private var cancellable: AnyCancellable?
-    
+
     private func deviceInfo(for id: AudioDeviceID) -> Device? {
         func string(_ selector: AudioObjectPropertySelector) -> String {
             var addr = AudioObjectPropertyAddress(
@@ -99,7 +99,7 @@ final class AudioDeviceService: ObservableObject {
         ) == noErr else { return false }
         return size > 0
     }
-    
+
     private func poll() {
         var size: UInt32 = 0
         guard AudioObjectGetPropertyDataSize(
