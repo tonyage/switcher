@@ -52,7 +52,6 @@ struct ContentView: View {
                         )
                     }
                 }
-
             }
         }.padding().background(.background).overlay {
             RoundedRectangle(
@@ -69,26 +68,6 @@ struct ContentView: View {
         Table(devices, selection: selection) {
             TableColumn("Name", value: \.name)
             TableColumn("Type", value: \.transport)
-        }
-    }
-    
-    @State private var volume: Double = 0.75
-    @State private var muted: Bool = false
-    
-    @ViewBuilder var volumeSlider: some View {
-        VStack(alignment: .trailing) {
-            HStack {
-                Text("Output Volume")
-                Spacer(minLength: 100)
-                Image(systemName: "speaker.fill")
-                Slider(value: $volume, in: 0...1, step: 0.15).disabled(muted)
-                Image(systemName: "speaker.wave.3.fill")
-            }
-            Toggle("Mute", isOn: $muted).toggleStyle(.checkbox)
-        }.padding().background(.background).overlay {
-            RoundedRectangle(
-                cornerRadius: 8, style: .continuous
-            ).strokeBorder(.white.opacity(0.12))
         }
     }
     
@@ -110,9 +89,45 @@ struct ContentView: View {
         VStack {
             picker
             if source == .Output {
-                volumeSlider
+                VolumeSlider()
             } else { inputLevel }
         }.padding().background(.background)
+    }
+}
+
+fileprivate struct VolumeSlider: View {
+    @EnvironmentObject private var service: AudioDeviceService
+    @State private var volume: Double = 0.75
+    @State private var muted: Bool = false
+    
+    var body: some View {
+        let binding = Binding(
+            get: { volume },
+            set: { newVolume in
+                volume = newVolume
+                if let id = service.defaultOutputDevice() {
+                    service.setMasterVolume(newVolume, on: id)
+                }
+            }
+        )
+        VStack(alignment: .trailing) {
+            HStack {
+                Text("Output Volume")
+                Spacer(minLength: 100)
+                Image(systemName: "speaker.fill")
+                Slider(value: binding, in: 0...1, step: 0.15).disabled(muted)
+                Image(systemName: "speaker.wave.3.fill")
+            }
+            Toggle("Mute", isOn: $muted).toggleStyle(.checkbox)
+        }.padding().background(.background).overlay {
+            RoundedRectangle(
+                cornerRadius: 8, style: .continuous
+            ).strokeBorder(.white.opacity(0.12))
+        }.task(id: service.masterVolume()) {
+            if let systemVolume = service.masterVolume() {
+                volume = systemVolume
+            }
+        }
     }
 }
 
