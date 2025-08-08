@@ -7,6 +7,7 @@
 
 import Combine
 import CoreAudio
+import CoreAudio.AudioHardware
 
 struct Device: Identifiable, Hashable {
     let id: AudioDeviceID
@@ -163,5 +164,64 @@ extension AudioDeviceService {
             size,
             &id
         )
+    }
+    
+    func defaultOutputDevice() -> AudioDeviceID? {
+        var id = AudioDeviceID(0)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        let status = AudioObjectGetPropertyData(
+            AudioObjectID(kAudioObjectSystemObject),
+            &address,
+            0,
+            nil,
+            &size,
+            &id
+        )
+        return status == noErr ? id : nil
+    }
+    
+    func setMasterVolume(_ volume: Double, on id: AudioDeviceID) {
+        var volume = Float32(max(0, min(1, volume)))
+        let size = UInt32(MemoryLayout.size(ofValue: volume))
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        _ = AudioObjectSetPropertyData(
+            id,
+            &address,
+            0,
+            nil,
+            size,
+            &volume
+        )
+    }
+    
+    func masterVolume() -> Double? {
+        guard let id = defaultOutputDevice() else { return nil }
+        
+        var volume: Float32 = 0
+        var size = UInt32(MemoryLayout.size(ofValue: volume))
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let result = AudioObjectGetPropertyData(
+            id,
+            &address,
+            0,
+            nil,
+            &size,
+            &volume
+        )
+        return result == noErr ? Double(volume) : nil
     }
 }
