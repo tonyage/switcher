@@ -9,11 +9,10 @@ import CoreAudio
 import SwiftUI
 
 struct ContentView: View {
-    
     @State private var source: SourceType = .Output
     @State private var text: String = .init()
-    @State private var outputDeviceIDs: Set<Device.ID> = []
-    @State private var inputDeviceIDs: Set<Device.ID> = []
+    @State private var outputDevices: Set<Device.ID> = []
+    @State private var inputDevices: Set<Device.ID> = []
 
     @EnvironmentObject private var service: AudioDeviceService
     
@@ -27,48 +26,23 @@ struct ContentView: View {
             
             switch source {
             case .Output:
-                table(
+                Devices(
                     devices: service.outputDevices,
-                    selection: $outputDeviceIDs,
+                    selection: $outputDevices,
                     selector: kAudioHardwarePropertyDefaultOutputDevice
-                ).onChange(of: outputDeviceIDs) { _, newSelection in
-                    if let selectedID = newSelection.first {
-                        service.set(
-                            to: selectedID,
-                            selector: kAudioHardwarePropertyDefaultOutputDevice
-                        )
-                    }
-                }
+                )
             case .Input:
-                table(
+                Devices(
                     devices: service.inputDevices,
-                    selection: $inputDeviceIDs,
+                    selection: $inputDevices,
                     selector: kAudioHardwarePropertyDefaultInputDevice
-                ).onChange(of: inputDeviceIDs) { _, newSelection in
-                    if let selectedID = newSelection.first {
-                        service.set(
-                            to: selectedID,
-                            selector: kAudioHardwarePropertyDefaultInputDevice
-                        )
-                    }
-                }
+                )
             }
         }.padding().background(.background).overlay {
             RoundedRectangle(
                 cornerRadius: 8, style: .continuous
             ).strokeBorder(.white.opacity(0.12))
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-    
-    @ViewBuilder private func table(
-        devices: [Device],
-        selection: Binding<Set<Device.ID>>,
-        selector: AudioObjectPropertySelector
-    ) -> some View {
-        Table(devices, selection: selection) {
-            TableColumn("Name", value: \.name)
-            TableColumn("Type", value: \.transport)
-        }
     }
     
     @ViewBuilder var inputLevel: some View {
@@ -91,7 +65,41 @@ struct ContentView: View {
             if source == .Output {
                 VolumeSlider()
             } else { inputLevel }
+            About()
         }.padding().background(.background)
+    }
+}
+
+fileprivate struct About: View {
+    private var version: String {
+        let dict = Bundle.main.infoDictionary
+        let ver = dict?["CFBundleShortVersionString"] as? String ?? "?.?.?"
+        return "v\(ver)"
+    }
+    
+    var body: some View {
+        HStack {
+            Spacer()
+            Text(version).font(.footnote).foregroundStyle(.secondary)
+        }.padding(.vertical, 1).padding(.horizontal, 1)
+    }
+}
+
+fileprivate struct Devices: View {
+    @EnvironmentObject private var service: AudioDeviceService
+    let devices: [Device]
+    @Binding var selection: Set<Device.ID>
+    var selector: AudioObjectPropertySelector
+    
+    var body: some View {
+        Table(devices, selection: $selection) {
+            TableColumn("Name", value: \.name)
+            TableColumn("Type", value: \.transport)
+        }.onChange(of: selection) { _, newSelection in
+            if let id = newSelection.first {
+                service.set(to: id, selector: selector)
+            }
+        }
     }
 }
 
@@ -101,13 +109,21 @@ fileprivate struct VolumeSlider: View {
     @State private var muted: Bool = false
     
     var body: some View {
-        let binding = Binding(
+        let device = service.getDevice(source: .Output)
+        let volumeBinding = Binding(
             get: { volume },
             set: { newVolume in
                 volume = newVolume
-                if let id = service.defaultOutputDevice() {
+                if let id = device {
                     service.setMasterVolume(newVolume, on: id)
                 }
+            }
+        )
+        let muteBinding = Binding(
+            get: { muted },
+            set: { flag in
+                muted = flag
+                if let id = device { service.muteDevice(flag, on: id) }
             }
         )
         VStack(alignment: .trailing) {
@@ -115,18 +131,22 @@ fileprivate struct VolumeSlider: View {
                 Text("Output Volume")
                 Spacer(minLength: 100)
                 Image(systemName: "speaker.fill")
-                Slider(value: binding, in: 0...1, step: 0.15).disabled(muted)
+                Slider(
+                    value: volumeBinding,
+                    in: 0...1,
+                    step: 0.15
+                ).disabled(muted)
                 Image(systemName: "speaker.wave.3.fill")
             }
-            Toggle("Mute", isOn: $muted).toggleStyle(.checkbox)
+            Toggle("Mute", isOn: muteBinding).toggleStyle(.checkbox)
         }.padding().background(.background).overlay {
             RoundedRectangle(
                 cornerRadius: 8, style: .continuous
             ).strokeBorder(.white.opacity(0.12))
-        }.task(id: service.masterVolume()) {
-            if let systemVolume = service.masterVolume() {
-                volume = systemVolume
-            }
+        }.task(id: device) {
+            guard let id = device else { return }
+            if let sysVol = service.masterVolume() { volume = sysVol }
+            if let sysMute = service.isDeviceMuted(id: id) { muted = sysMute }
         }
     }
 }
@@ -156,7 +176,6 @@ fileprivate struct InputLevel: View {
 enum SourceType: String, CaseIterable, Identifiable, Hashable {
     case Output
     case Input
-    
     var id: Self { self }
 }
 
