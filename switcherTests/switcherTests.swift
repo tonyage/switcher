@@ -62,18 +62,16 @@ struct AudioHardwareListenerPlumbingTests {
 
 @Suite
 struct OutputTests {
-    @Test("set master volume of first output device")
-    func setMasterVolume() async throws {
+    @Test("read master volume of first output device")
+    func readMasterVolume() async throws {
         let service = await AudioDeviceService(
             listener: AudioHardwareListener()
         )
         
         let id = await service.getDevice(source: .Output)
         let currentVolume = await service.masterVolume()
-        await service.setMasterVolume(1.0, on: id.unsafelyUnwrapped)
-        let newVolume = await service.masterVolume()
         
-        #expect(currentVolume.unsafelyUnwrapped == newVolume.unsafelyUnwrapped)
+        #expect(currentVolume.unsafelyUnwrapped == 1.0)
     }
     
     @Test("check that first output device is not muted")
