@@ -6,13 +6,13 @@
 //
 
 import CoreAudio
+import ServiceManagement
 import SwiftUI
 
 struct ContentView: View {
     @State private var source: SourceType = .Output
-    @State private var currentDevice: Device.ID?
     @EnvironmentObject private var service: AudioDeviceService
-
+    
     @ViewBuilder var devices: some View {
         Devices(
             devices: source == .Output
@@ -162,7 +162,6 @@ fileprivate struct DeviceRow: View {
         .background {
             Rectangle()
                 .fill(isSelected ? Color.accentColor : .clear)
-                .allowsHitTesting(false)
         }
         .onTapGesture { onSelect() }
         .accessibilityElement(children: .combine)
@@ -170,6 +169,9 @@ fileprivate struct DeviceRow: View {
     }
 }
 
+/// TODO: hook up sliders for volume, channel balance, and input gain, only mute works currently
+/// will involve probing CoreAudio for acceptable values to set volume, service currently has no
+/// logic for retrieving and setting channel balance values and input gain.
 fileprivate struct SoundManagement: View {
     @EnvironmentObject private var service: AudioDeviceService
     @Binding var source: SourceType
@@ -237,7 +239,10 @@ fileprivate struct SoundManagement: View {
         .task(id: device) {
             guard let id = device else { return }
             if let sysMute = service.isDeviceMuted(id: id) { muted = sysMute }
-            if let sysVolume = service.masterVolume() { volume = sysVolume }
+            if let sysVolume = service.masterVolume() {
+                print("systemVolume: \(sysVolume)")
+                volume = sysVolume
+            }
         }
         .padding()
         .background(
