@@ -21,6 +21,8 @@ struct Device: Identifiable, Hashable {
 final class AudioDeviceService: ObservableObject {
     @Published private(set) var outputDevices: [Device] = []
     @Published private(set) var inputDevices: [Device] = []
+    @Published private(set) var currentOutputDevice: Device.ID?
+    @Published private(set) var currentInputDevice: Device.ID?
 
     private let listener: AudioHardwareListener
     private var cancellable: AnyCancellable?
@@ -128,6 +130,8 @@ final class AudioDeviceService: ObservableObject {
         }
         outputDevices = devices.filter { $0.isOutput && !$0.isInput }
         inputDevices = devices.filter(\.isInput)
+        currentOutputDevice = getDevice(source: .Output)
+        currentInputDevice = getDevice(source: .Input)
     }
     
     func getDevice(source: SourceType) -> AudioDeviceID? {
@@ -188,7 +192,7 @@ final class AudioDeviceService: ObservableObject {
     deinit { cancellable?.cancel() }
 }
 
-// OUTPUT DEVICE FUNCTIONS
+/// OUTPUT DEVICE FUNCTIONS
 extension AudioDeviceService {
     func setMasterVolume(_ volume: Double, on id: AudioDeviceID) {
         var volume = Float32(max(0, min(1, volume)))
