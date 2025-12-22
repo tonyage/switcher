@@ -21,7 +21,7 @@ struct Device: Identifiable, Hashable {
 final class AudioDeviceService: ObservableObject {
     @Published private(set) var outputDevices: [Device] = []
     @Published private(set) var inputDevices: [Device] = []
-    
+
     private let listener: AudioHardwareListener
     private var cancellable: AnyCancellable?
 
@@ -126,9 +126,7 @@ final class AudioDeviceService: ObservableObject {
             guard let device = deviceInfo(for: id) else { return nil }
             return device
         }
-        outputDevices = devices.filter {
-            $0.isOutput && !$0.isInput
-        }
+        outputDevices = devices.filter { $0.isOutput && !$0.isInput }
         inputDevices = devices.filter(\.isInput)
     }
     

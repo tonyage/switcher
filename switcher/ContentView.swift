@@ -10,63 +10,81 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var source: SourceType = .Output
-    @State private var text: String = .init()
-    @State private var outputDevices: Set<Device.ID> = []
-    @State private var inputDevices: Set<Device.ID> = []
+    @State private var currentDevice: Device.ID?
 
     @EnvironmentObject private var service: AudioDeviceService
-    
-    @ViewBuilder var picker: some View {
-        VStack(spacing: 0) {
-            Picker("SourceType", selection: $source) {
-                ForEach(SourceType.allCases) {
-                    Text($0.rawValue)
-                }
-            }.labelsHidden().pickerStyle(.segmented).tint(.blue)
-            
-            switch source {
-            case .Output:
-                Devices(
-                    devices: service.outputDevices,
-                    selection: $outputDevices,
-                    selector: kAudioHardwarePropertyDefaultOutputDevice
-                )
-            case .Input:
-                Devices(
-                    devices: service.inputDevices,
-                    selection: $inputDevices,
-                    selector: kAudioHardwarePropertyDefaultInputDevice
-                )
-            }
-        }.padding().background(.background).overlay {
-            RoundedRectangle(
-                cornerRadius: 8, style: .continuous
-            ).strokeBorder(.white.opacity(0.12))
-        }.frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
     
     @ViewBuilder var inputLevel: some View {
         VStack(alignment: .trailing) {
             HStack {
                 Text("Input Level")
-                Spacer(minLength: 100)
+                Spacer(minLength: 90)
                 InputLevel(level: 2.0)
             }
-        }.padding().background(.background).overlay {
-            RoundedRectangle(
-                cornerRadius: 8, style: .continuous
-            ).strokeBorder(.white.opacity(0.12))
         }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16).fill(Color.secondary.opacity(0.05))
+        )
     }
 
+    @ViewBuilder var devices: some View {
+        switch source {
+        case .Output:
+            Devices(
+                devices: service.outputDevices,
+                selector: kAudioHardwarePropertyDefaultOutputDevice,
+                source: $source
+            )
+        case .Input:
+            Devices(
+                devices: service.inputDevices,
+                selector: kAudioHardwarePropertyDefaultInputDevice,
+                source: $source
+            )
+        }
+    }
+    
     var body: some View {
         VStack {
-            picker
+            Text("switcher")
+                .bold()
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            devices
             if source == .Output {
-                VolumeSlider()
+                SoundManagement()
             } else { inputLevel }
             About()
-        }.padding().background(.background)
+        }
+        .padding()
+        .onAppear(perform: syncCurrentDevice)
+    }
+    
+    private func syncCurrentDevice() {
+        currentDevice = service.getDevice(source: source)
+    }
+}
+
+fileprivate struct SourcePicker: View {
+    @Binding var source: SourceType
+    
+    var body: some View {
+        HStack {
+            ForEach(SourceType.allCases, id: \.self) { selection in
+                Button { source = selection } label: {
+                    Text("\(selection.rawValue)")
+                        .frame(maxWidth: .infinity)
+                        .padding(4)
+                }
+                .foregroundStyle(.primary)
+                .background(source == selection ? .accentColor : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .buttonStyle(.borderless)
+            }
+        }
+        .background(Color(NSColor.darkGray))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -81,29 +99,88 @@ fileprivate struct About: View {
         HStack {
             Spacer()
             Text(version).font(.footnote).foregroundStyle(.secondary)
-        }.padding(.vertical, 1).padding(.horizontal, 1)
+        }
+        .padding(.vertical, 1)
+        .padding(.horizontal, 1)
     }
 }
 
 fileprivate struct Devices: View {
     @EnvironmentObject private var service: AudioDeviceService
     let devices: [Device]
-    @Binding var selection: Set<Device.ID>
     var selector: AudioObjectPropertySelector
+    let columns: [GridItem] = Array(
+        repeating: .init(.flexible(), alignment: .leading),
+        count: 1
+    )
+    @Binding var source: SourceType
     
     var body: some View {
-        Table(devices, selection: $selection) {
-            TableColumn("Name", value: \.name)
-            TableColumn("Type", value: \.transport)
-        }.onChange(of: selection) { _, newSelection in
-            if let id = newSelection.first {
-                service.set(to: id, selector: selector)
+        ScrollView {
+            LazyVGrid(
+                columns: columns,
+                spacing: 0,
+                pinnedViews: [.sectionHeaders]
+            ) {
+                Section(
+                    header: SourcePicker(source: $source)
+                        .padding(10)
+                        .background(
+                            UnevenRoundedRectangle(
+                                cornerRadii: .init(topLeading: 16, topTrailing: 16)
+                            ).fill(.clear))
+                ) {
+                    HStack {
+                        Text("Name")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        Text("Type")
+                            .font(.subheadline)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(8)
+                    .background(Color.primary.opacity(0.1))
+
+                    ForEach(devices.indices, id: \.self) { index in
+                        HStack {
+                            Text(devices[index].name)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                            Text(devices[index].transport)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                        .padding(8)
+                        .contentShape(.rect)
+                        .background(isEven(index) ? .clear : .primary.opacity(0.1))
+                    }
+                }
             }
         }
+        .mask(RoundedRectangle(cornerRadius: 16))
+        .background(RoundedRectangle(cornerRadius: 16).fill(.secondary.opacity(0.05)))
+    }
+
+    func isEven(_ index: Int) -> Bool {
+        index % 2 == 0
     }
 }
 
-fileprivate struct VolumeSlider: View {
+fileprivate struct DeviceRow: View {
+    let device: Device
+    let isSelected: Bool
+    
+    var body: some View {
+        HStack {
+            Text(device.name)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(device.transport)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(8)
+        .contentShape(.rect)
+    }
+}
+
+fileprivate struct SoundManagement: View {
     @EnvironmentObject private var service: AudioDeviceService
     @State private var volume: Double = 0.75
     @State private var muted: Bool = false
@@ -126,7 +203,7 @@ fileprivate struct VolumeSlider: View {
                 if let id = device { service.muteDevice(flag, on: id) }
             }
         )
-        VStack(alignment: .trailing) {
+        VStack(alignment: .trailing, spacing: 8) {
             HStack {
                 Text("Output Volume")
                 Spacer(minLength: 100)
@@ -134,20 +211,26 @@ fileprivate struct VolumeSlider: View {
                 Slider(
                     value: volumeBinding,
                     in: 0...1,
-                    step: 0.15
+                    step: 0.18
                 ).disabled(muted)
                 Image(systemName: "speaker.wave.3.fill")
             }
             Toggle("Mute", isOn: muteBinding).toggleStyle(.checkbox)
-        }.padding().background(.background).overlay {
-            RoundedRectangle(
-                cornerRadius: 8, style: .continuous
-            ).strokeBorder(.white.opacity(0.12))
+            Divider()
+            HStack {
+                Text("Balance")
+                Spacer(minLength: 145)
+                Slider(value: volumeBinding, in: 0...2, step: 1)
+            }
         }.task(id: device) {
             guard let id = device else { return }
             if let sysVol = service.masterVolume() { volume = sysVol }
             if let sysMute = service.isDeviceMuted(id: id) { muted = sysMute }
         }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16).fill(Color.secondary.opacity(0.05))
+        )
     }
 }
 
