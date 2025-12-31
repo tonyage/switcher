@@ -9,11 +9,18 @@ import CoreAudio
 import ServiceManagement
 import SwiftUI
 
+enum SourceType: String, CaseIterable, Identifiable, Hashable {
+    case Output
+    case Input
+    var id: Self { self }
+}
+
 struct ContentView: View {
     @State private var source: SourceType = .Output
     @EnvironmentObject private var service: AudioDeviceService
     
-    @ViewBuilder var devices: some View {
+    @ViewBuilder
+    private var devices: some View {
         Devices(
             devices: source == .Output
                 ? service.outputDevices
@@ -215,7 +222,8 @@ fileprivate struct SoundManagement: View {
         }
     }
 
-    @ViewBuilder var inputLevel: some View {
+    @ViewBuilder
+    private var inputLevel: some View {
         VStack(alignment: .trailing) {
             HStack {
                 Text("Input Level")
@@ -269,14 +277,9 @@ fileprivate struct InputLevel: View {
                         : .gray.opacity(0.15)
                     )
             }
-        }.animation(.linear(duration: 0.05), value: level)
+        }
+        .animation(.linear(duration: 0.05), value: level)
     }
-}
-
-enum SourceType: String, CaseIterable, Identifiable, Hashable {
-    case Output
-    case Input
-    var id: Self { self }
 }
 
 #Preview("Devices") {
