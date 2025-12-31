@@ -52,6 +52,7 @@ struct ContentView: View {
 fileprivate struct SourcePicker: View {
     @Binding var source: SourceType
     
+    /// TODO: button background should be translucent probably
     var body: some View {
         HStack {
             ForEach(SourceType.allCases, id: \.self) { selection in
@@ -69,7 +70,7 @@ fileprivate struct SourcePicker: View {
                 }
             }
         }
-        .background(Color(NSColor.darkGray))
+        .background(Color.primary.opacity(0.2))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
@@ -102,7 +103,7 @@ fileprivate struct Devices: View {
     private var headerView: some View {
         SourcePicker(source: $source)
             .padding(10)
-            .background(Color.clear)
+            .background(Color.black.opacity(0.3))
     }
 
     @ViewBuilder
@@ -130,7 +131,12 @@ fileprivate struct Devices: View {
                     service.set(to: devices[index].id, selector: selector)
                 }
             )
-            .background(Rectangle().fill(isEven(index) ? .clear : .primary.opacity(0.1)))
+            .background(
+                Rectangle()
+                    .fill(
+                        isEven(index) ? .black.opacity(0.3) : .primary.opacity(0.1)
+                    )
+            )
         }
     }
 
@@ -144,7 +150,7 @@ fileprivate struct Devices: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
-        .background(RoundedRectangle(cornerRadius: 16).fill(.secondary.opacity(0.05)))
+        .background(RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.3)))
     }
 
     func isEven(_ index: Int) -> Bool {
@@ -182,7 +188,7 @@ fileprivate struct DeviceRow: View {
 fileprivate struct SoundManagement: View {
     @EnvironmentObject private var service: AudioDeviceService
     @Binding var source: SourceType
-    @State private var volume: Double = 0.5
+    @State private var volume: Float32 = 0.5
     @State private var muted: Bool = false
     @State private var balance: Double = 1.0
     @State private var isEditing: Bool = false
@@ -203,7 +209,7 @@ fileprivate struct SoundManagement: View {
                         print("onEditingChanged: \(volume)")
                     } else {
                         print("setMasterVolume: \(volume)")
-                        service.setMasterVolume(volume, on: device)
+                        service.setVolume(volume, on: device)
                     }
                 }
             )
@@ -247,14 +253,14 @@ fileprivate struct SoundManagement: View {
         .task(id: device) {
             guard let id = device else { return }
             if let sysMute = service.isDeviceMuted(id: id) { muted = sysMute }
-            if let sysVolume = service.masterVolume() {
+            if let sysVolume = service.volume() {
                 print("systemVolume: \(sysVolume)")
                 volume = sysVolume
             }
         }
         .padding()
         .background(
-            RoundedRectangle(cornerRadius: 16).fill(Color.secondary.opacity(0.05))
+            RoundedRectangle(cornerRadius: 16).fill(Color.black.opacity(0.3))
         )
     }
 }

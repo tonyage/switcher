@@ -69,7 +69,7 @@ struct OutputTests {
         )
         
         let id = await service.getDevice(source: .Output)
-        let currentVolume = await service.masterVolume()
+        let currentVolume = await service.volume()
         
         #expect(currentVolume.unsafelyUnwrapped == 1.0)
     }
