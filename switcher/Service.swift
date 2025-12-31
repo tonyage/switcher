@@ -101,6 +101,26 @@ final class AudioDeviceService: ObservableObject {
         ) == noErr else { return false }
         return size > 0
     }
+    
+    private func channelCount(id: AudioObjectID) -> UInt32 {
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyStreamConfiguration,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var size: UInt32 = 0
+        AudioObjectGetPropertyDataSize(id, &addr, 0, nil, &size)
+        let bufferList = UnsafeMutablePointer<AudioBufferList>.allocate(capacity: Int(size))
+        defer { bufferList.deallocate() }
+        
+        AudioObjectGetPropertyData(id, &addr, 0, nil, &size, bufferList)
+        var channels: UInt32 = 0
+        let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+        for buffer in buffers {
+            channels += buffer.mNumberChannels
+        }
+        return channels
+    }
 
     private func poll() {
         var size: UInt32 = 0
@@ -194,28 +214,43 @@ final class AudioDeviceService: ObservableObject {
 
 /// OUTPUT DEVICE FUNCTIONS
 extension AudioDeviceService {
-    func setMasterVolume(_ volume: Double, on id: AudioDeviceID) {
-        var volume = Float32(max(0, min(1, volume)))
-        let size = UInt32(MemoryLayout.size(ofValue: volume))
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyVolumeScalar,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        _ = AudioObjectSetPropertyData(id, &addr, 0, nil, size, &volume)
+    func setVolume(_ volume: Float32, on id: AudioDeviceID) {
+        let channels = channelCount(id: id)
+        guard channels > 0 else { return }
+        
+        for channel in 1...channels {
+            var volume = volume
+            let size = UInt32(MemoryLayout.size(ofValue: volume))
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: channel
+            )
+            AudioObjectSetPropertyData(id, &addr, 0, nil, size, &volume)
+        }
     }
     
-    func masterVolume() -> Double? {
+    func volume() -> Float32? {
         guard let id = getDevice(source: .Output) else { return nil }
-        var volume: Float32 = 0
-        var size = UInt32(MemoryLayout.size(ofValue: volume))
-        var addr = AudioObjectPropertyAddress(
-            mSelector: kAudioDevicePropertyVolumeScalar,
-            mScope: kAudioDevicePropertyScopeOutput,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        let res = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &volume)
-        return res == noErr ? Double(volume) : nil
+        
+        let channels = channelCount(id: id)
+        guard channels > 0 else { return nil }
+        
+        var totalVolume: Float32 = 0
+        
+        for channel in 1...channels {
+            var volume: Float32 = 0
+            var size = UInt32(MemoryLayout.size(ofValue: volume))
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: channel
+            )
+            let res = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &volume)
+            
+            if res == noErr { totalVolume += volume }
+        }
+        return totalVolume / Float32(channels)
     }
     
     func isDeviceMuted(id: AudioDeviceID) -> Bool? {
