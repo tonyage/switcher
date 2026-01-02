@@ -18,14 +18,14 @@ struct Device: Identifiable, Hashable {
 }
 
 @MainActor
-final class AudioDeviceService: ObservableObject {
-    @Published private(set) var outputDevices: [Device] = []
-    @Published private(set) var inputDevices: [Device] = []
-    @Published private(set) var currentOutputDevice: Device.ID?
-    @Published private(set) var currentInputDevice: Device.ID?
-
+@Observable
+final class AudioDeviceService {
+    private(set) var outputDevices: [Device] = []
+    private(set) var inputDevices: [Device] = []
+    private(set) var currentOutputDevice: Device.ID?
+    private(set) var currentInputDevice: Device.ID?
+    
     private let listener: AudioHardwareListener
-    private var cancellable: AnyCancellable?
 
     private func deviceInfo(for id: AudioDeviceID) -> Device? {
         func string(_ selector: AudioObjectPropertySelector) -> String {
@@ -121,12 +121,135 @@ final class AudioDeviceService: ObservableObject {
         }
         return channels
     }
+    
+    /// TODO: might cull this entirely and ignore handling for devices that support
+    /// surround sound.
+    private func channelLayout(id: AudioObjectID) -> AudioChannelLayout? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyPreferredChannelLayout,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
+        var size: UInt32 = 0
+        guard AudioObjectGetPropertyDataSize(
+            id,
+            &address,
+            0,
+            nil,
+            &size
+        ) == noErr else { return nil }
+        
+        let ptr = UnsafeMutableRawPointer.allocate(
+            byteCount: Int(size),
+            alignment: MemoryLayout<AudioChannelLayout>.alignment
+        )
+        
+        defer { ptr.deallocate() }
+        guard AudioObjectGetPropertyData(
+            id,
+            &address,
+            0,
+            nil,
+            &size,
+            ptr
+        ) == noErr else { return nil }
+        return ptr.assumingMemoryBound(to: AudioChannelLayout.self).pointee
+    }
+    
+    private func frontChannels(layout: AudioChannelLayout) -> (left: UInt32?, right: UInt32?)? {
+        var left: UInt32?
+        var right: UInt32?
+        
+        for (i, description) in layout.channelDescriptions().enumerated() {
+            switch description.mChannelLabel {
+                case kAudioChannelLabel_Left:
+                    left = UInt32(i + 1)
+                case kAudioChannelLabel_Right:
+                    right = UInt32(i + 1)
+                default:
+                    break
+            }
+        }
+        return (left, right)
+    }
+    
+    private func channelVolumes(id: AudioObjectID) -> [UInt32: Float32] {
+        var volumes: [UInt32: Float32] = [:]
+        
+        let channelCount = channelCount(id: id)
+        for channel in 1...channelCount {
+            var volume: Float32 = 0
+            var size = UInt32(MemoryLayout.size(ofValue: volume))
+            var addr = AudioObjectPropertyAddress(
+                mSelector: kAudioDevicePropertyVolumeScalar,
+                mScope: kAudioDevicePropertyScopeOutput,
+                mElement: channel
+            )
+            let res = AudioObjectGetPropertyData(id, &addr, 0, nil, &size, &volume)
+            
+            if res == noErr { volumes[channel] = volume }
+        }
+        return volumes
+    }
+    
+    func setBalance(
+        _ balance: Float32,
+        on id: AudioObjectID
+    ) {
+        guard
+            let layout = channelLayout(id: id),
+            let frontChannels = frontChannels(layout: layout),
+            let leftChannel = frontChannels.left,
+            let rightChannel = frontChannels.right
+        else { return }
+        
+        let volumes = channelVolumes(id: id)
+        
+        guard
+            let leftBase = volumes[leftChannel],
+            let rightBase = volumes[rightChannel]
+        else { return }
+        
+        let clamped = max(-1, min(balance, 1))
+        let leftVol: Float32
+        let rightVol: Float32
+        
+        if clamped < 0 {
+            leftVol = leftBase
+            rightVol = rightBase * (1 + clamped)
+        } else {
+            leftVol = leftBase * (1 - clamped)
+            rightVol = rightBase
+        }
+        
+        setChannelVolume(leftVol, on: id, for: leftChannel)
+        setChannelVolume(rightVol, on: id, for: rightChannel)
+    }
+    
+    private func setChannelVolume(_ volume: Float32, on id: AudioDeviceID, for channel: UInt32) {
+        var volume = volume
+        let size = UInt32(MemoryLayout.size(ofValue: volume))
+        var addr = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeOutput,
+            mElement: channel
+        )
+        AudioObjectSetPropertyData(id, &addr, 0, nil, size, &volume)
+    }
+
 
     private func poll() {
         var size: UInt32 = 0
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyDevices,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        
         guard AudioObjectGetPropertyDataSize(
             AudioClassID(kAudioObjectSystemObject),
-            &listener.address,
+            &address,
             0,
             nil,
             &size
@@ -137,7 +260,7 @@ final class AudioDeviceService: ObservableObject {
         
         guard AudioObjectGetPropertyData(
             AudioClassID(kAudioObjectSystemObject),
-            &listener.address,
+            &address,
             0,
             nil,
             &size,
@@ -150,10 +273,44 @@ final class AudioDeviceService: ObservableObject {
         }
         outputDevices = devices.filter { $0.isOutput && !$0.isInput }
         inputDevices = devices.filter(\.isInput)
+    }
+    
+    private func currentDevices() {
         currentOutputDevice = getDevice(source: .Output)
         currentInputDevice = getDevice(source: .Input)
     }
     
+    private func registerListeners() {
+        listener.onDevicesChanged = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.poll()
+                self.currentDevices()
+            }
+        }
+        listener.onDeviceChanged = { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in
+                self.currentDevices()
+            }
+        }
+        listener.start()
+    }
+    
+    private func start() {
+        poll()
+        currentDevices()
+        registerListeners()
+    }
+
+    init(listener: AudioHardwareListener) {
+        self.listener = listener
+        start()
+    }
+}
+
+/// OUTPUT DEVICE FUNCTIONS
+extension AudioDeviceService {
     func getDevice(source: SourceType) -> AudioDeviceID? {
         func selectorType(_ source: SourceType) -> AudioObjectPropertySelector {
             if source == .Output {
@@ -181,7 +338,7 @@ final class AudioDeviceService: ObservableObject {
         )
         return status == noErr ? id : nil
     }
-
+    
     func set(to id: AudioDeviceID, selector: AudioObjectPropertySelector) {
         var id = id
         let size = UInt32(MemoryLayout.size(ofValue: id))
@@ -199,34 +356,24 @@ final class AudioDeviceService: ObservableObject {
             size,
             &id
         )
-    }
-    
-    init(listener: AudioHardwareListener = .init()) {
-        self.listener = listener
-        poll()
-        cancellable = listener.publisher.receive(on: RunLoop.main).sink {
-            [weak self] in self?.poll()
+        
+        /// Immediately update current device state when change initiated by user
+        switch selector {
+            case kAudioHardwarePropertyDefaultOutputDevice:
+                currentOutputDevice = id
+            case kAudioHardwarePropertyDefaultInputDevice:
+                currentInputDevice = id
+            default:
+                break
         }
     }
     
-    deinit { cancellable?.cancel() }
-}
-
-/// OUTPUT DEVICE FUNCTIONS
-extension AudioDeviceService {
     func setVolume(_ volume: Float32, on id: AudioDeviceID) {
         let channels = channelCount(id: id)
         guard channels > 0 else { return }
         
         for channel in 1...channels {
-            var volume = volume
-            let size = UInt32(MemoryLayout.size(ofValue: volume))
-            var addr = AudioObjectPropertyAddress(
-                mSelector: kAudioDevicePropertyVolumeScalar,
-                mScope: kAudioDevicePropertyScopeOutput,
-                mElement: channel
-            )
-            AudioObjectSetPropertyData(id, &addr, 0, nil, size, &volume)
+            setChannelVolume(volume, on: id, for: channel)
         }
     }
     
@@ -253,7 +400,7 @@ extension AudioDeviceService {
         return totalVolume / Float32(channels)
     }
     
-    func isDeviceMuted(id: AudioDeviceID) -> Bool? {
+    func isDeviceMuted(id: AudioDeviceID) -> Bool {
         var muted: UInt32 = 0
         let size = UInt32(MemoryLayout.size(ofValue: muted))
         var addr = AudioObjectPropertyAddress(
@@ -263,7 +410,7 @@ extension AudioDeviceService {
         )
         return AudioObjectSetPropertyData(
             id, &addr, 0, nil, size, &muted
-        ) == noErr ? (muted != 0) : nil
+        ) == noErr ? (muted != 0) : false
     }
     
     func muteDevice(_ flag: Bool, on id: AudioDeviceID) {

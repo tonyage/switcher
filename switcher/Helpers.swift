@@ -9,13 +9,16 @@ import CoreAudio
 import ServiceManagement
 import SwiftUI
 
-private extension AudioObjectPropertyAddress {
-    init(
-        _ selector: AudioObjectPropertySelector,
-        _ scope: AudioObjectPropertyScope,
-        _ element: AudioObjectPropertyElement
-    ) {
-        self.init(mSelector: selector, mScope: scope, mElement: element)
+extension AudioChannelLayout {
+    /// Hopefully safe and idiomatic swift way of wrapping unsafe pointers to memory
+    /// for walking C arrays
+    func channelDescriptions() -> UnsafeBufferPointer<AudioChannelDescription> {
+        UnsafeBufferPointer(
+            start: UnsafeRawPointer(withUnsafePointer(to: self) { $0 })?
+                .advanced(by: MemoryLayout<AudioChannelLayout>.size)
+                .assumingMemoryBound(to: AudioChannelDescription.self),
+            count: Int(mNumberChannelDescriptions)
+        )
     }
 }
 
