@@ -14,12 +14,12 @@ internal let HEIGHT: CGFloat = 400
 struct Switcher: App {
     
     private let listener: AudioHardwareListener
-    @StateObject private var service: AudioDeviceService
+    @State private var service: AudioDeviceService
     
     init() {
         let listener = AudioHardwareListener()
         self.listener = listener
-        _service = StateObject(
+        _service = State(
             wrappedValue: AudioDeviceService(listener: listener)
         )
     }
@@ -28,7 +28,7 @@ struct Switcher: App {
         MenuBarExtra {
             ContentView()
                 .frame(width: WIDTH, height: HEIGHT)
-                .environmentObject(service)
+                .environment(service)
         } label: {
             Image(systemName: "headphones").imageScale(.large)
         }.menuBarExtraStyle(.window)

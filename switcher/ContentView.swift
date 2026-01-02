@@ -5,6 +5,7 @@
 //  Created by Tony Do on 7/14/25.
 //
 
+import Combine
 import CoreAudio
 import ServiceManagement
 import SwiftUI
@@ -17,7 +18,7 @@ enum SourceType: String, CaseIterable, Identifiable, Hashable {
 
 struct ContentView: View {
     @State private var source: SourceType = .Output
-    @EnvironmentObject private var service: AudioDeviceService
+    @Environment(AudioDeviceService.self) private var service
     
     @ViewBuilder
     private var devices: some View {
@@ -28,9 +29,6 @@ struct ContentView: View {
             selector: source == .Output
                 ? kAudioHardwarePropertyDefaultOutputDevice
                 : kAudioHardwarePropertyDefaultInputDevice,
-            currentDevice: source == .Output
-                ? service.currentOutputDevice
-                : service.currentInputDevice,
             source: $source
         )
     }
@@ -52,7 +50,6 @@ struct ContentView: View {
 fileprivate struct SourcePicker: View {
     @Binding var source: SourceType
     
-    /// TODO: button background should be translucent probably
     var body: some View {
         HStack {
             ForEach(SourceType.allCases, id: \.self) { selection in
@@ -70,7 +67,7 @@ fileprivate struct SourcePicker: View {
                 }
             }
         }
-        .background(Color.primary.opacity(0.2))
+        .background(Color.primary.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 }
@@ -92,18 +89,90 @@ fileprivate struct About: View {
     }
 }
 
-fileprivate struct Devices: View {
-    @EnvironmentObject private var service: AudioDeviceService
-    let devices: [Device]
+fileprivate struct SecondaryDevices: View {
+    @Environment(AudioDeviceService.self) private var service
+    @State private var devices: [Device]
+    @State private var currentDevice: Device.ID?
     let selector: AudioObjectPropertySelector
-    @State var currentDevice: Device.ID?
+    @State private var cancellables = Set<AnyCancellable>()
+    
     @Binding var source: SourceType
 
     @ViewBuilder
     private var headerView: some View {
         SourcePicker(source: $source)
             .padding(10)
-            .background(Color.black.opacity(0.3))
+            .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private var sectionHeaderRow: some View {
+        HStack {
+            Text("Name")
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text("Type")
+                .font(.subheadline)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(8)
+        .background(Color.primary.opacity(0.3))
+    }
+
+    @ViewBuilder
+    private func deviceRow() -> some View {
+        ForEach(devices.indices, id: \.self) { index in
+            DeviceRow(
+                device: devices[index],
+                isSelected: devices[index].id == currentDevice,
+                onSelect: {
+                    service.set(to: devices[index].id, selector: selector)
+                }
+            )
+            .background(
+                Rectangle()
+                    .fill(
+                        index % 2 == 0
+                        ? .black.opacity(0.3)
+                        : .primary.opacity(0.3)
+                    )
+            )
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                Section(header: headerView) {
+                    sectionHeaderRow
+                    deviceRow()
+                }
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.3)))
+    }
+}
+
+fileprivate struct Devices: View {
+    @Environment(AudioDeviceService.self) private var service
+    let devices: [Device]
+    let selector: AudioObjectPropertySelector
+    private var currentDevice: Device.ID? {
+        source == .Output
+            ? service.currentOutputDevice
+            : service.currentInputDevice
+    }
+    
+    @State private var cancellables = Set<AnyCancellable>()
+    
+    @Binding var source: SourceType
+
+    @ViewBuilder
+    private var headerView: some View {
+        SourcePicker(source: $source)
+            .padding(10)
+            .background(.ultraThinMaterial)
     }
 
     @ViewBuilder
@@ -127,14 +196,15 @@ fileprivate struct Devices: View {
                 device: devices[index],
                 isSelected: devices[index].id == currentDevice,
                 onSelect: {
-                    currentDevice = devices[index].id
                     service.set(to: devices[index].id, selector: selector)
                 }
             )
             .background(
                 Rectangle()
                     .fill(
-                        isEven(index) ? .black.opacity(0.3) : .primary.opacity(0.1)
+                        index % 2 == 0
+                        ? .black.opacity(0.3)
+                        : .primary.opacity(0.1)
                     )
             )
         }
@@ -151,10 +221,6 @@ fileprivate struct Devices: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.3)))
-    }
-
-    func isEven(_ index: Int) -> Bool {
-        index % 2 == 0
     }
 }
 
@@ -182,20 +248,20 @@ fileprivate struct DeviceRow: View {
     }
 }
 
-/// TODO: hook up sliders for volume, channel balance, and input gain, only mute works currently
-/// will involve probing CoreAudio for acceptable values to set volume, service currently has no
-/// logic for retrieving and setting channel balance values and input gain.
+/// TODO: hook up sliders for channel balance and input gain, only mute and volume work currently
+/// service currently has no logic for retrieving and setting channel balance values and
+/// reading input gain.
 fileprivate struct SoundManagement: View {
-    @EnvironmentObject private var service: AudioDeviceService
+    @Environment(AudioDeviceService.self) private var service
     @Binding var source: SourceType
     @State private var volume: Float32 = 0.5
     @State private var muted: Bool = false
-    @State private var balance: Double = 1.0
+    @State private var balance: Float32 = 0.0
     @State private var isEditing: Bool = false
 
     @ViewBuilder
     private var volumeSlider: some View {
-        let device = service.getDevice(source: .Output)!
+        let device = service.currentOutputDevice!
         HStack {
             Text("Output Volume")
             Spacer(minLength: 100)
@@ -205,26 +271,32 @@ fileprivate struct SoundManagement: View {
                 in: 0...1.0,
                 onEditingChanged: { editing in
                     isEditing = editing
-                    if editing {
-                        print("onEditingChanged: \(volume)")
-                    } else {
-                        print("setMasterVolume: \(volume)")
-                        service.setVolume(volume, on: device)
-                    }
+                    service.setVolume(volume, on: device)
                 }
             )
             .disabled(muted)
             Image(systemName: "speaker.wave.3.fill")
         }
-        Toggle("Mute", isOn: $muted).toggleStyle(.checkbox)
+        Toggle("Mute", isOn: $muted).onChange(of: muted) {
+            service.muteDevice(muted, on: device)
+        }.toggleStyle(.checkbox)
     }
     
     @ViewBuilder
     private var balanceSlider: some View {
+        let device = service.currentOutputDevice!
         HStack {
             Text("Balance")
             Spacer(minLength: 145)
-            Slider(value: $balance, in: 0...2, step: 1)
+            Slider(
+                value: $balance,
+                in: 0...2,
+                step: 0.5,
+                onEditingChanged: { editing in
+                    isEditing = editing
+                    service.setBalance(balance, on: device)
+                }
+            )
         }
     }
 
@@ -251,10 +323,7 @@ fileprivate struct SoundManagement: View {
             }
         }
         .task(id: device) {
-            guard let id = device else { return }
-            if let sysMute = service.isDeviceMuted(id: id) { muted = sysMute }
             if let sysVolume = service.volume() {
-                print("systemVolume: \(sysVolume)")
                 volume = sysVolume
             }
         }
@@ -289,7 +358,7 @@ fileprivate struct InputLevel: View {
 }
 
 #Preview("Devices") {
-    ContentView().frame(width: WIDTH, height: HEIGHT).environmentObject(
+    ContentView().frame(width: WIDTH, height: HEIGHT).environment(
         AudioDeviceService(listener: AudioHardwareListener())
     )
 }
