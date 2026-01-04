@@ -51,9 +51,6 @@ struct Settings: View {
     @State @Previewable var router = NavigationRouter()
     NavigationStack(path: $router.paths) {
         router.navigate(to: .settings)
-            .navigationDestination(for: Screen.self) { screen in
-                router.navigate(to: screen)
-            }
     }
     .frame(width: WIDTH, height: HEIGHT)
     .environment(router)
