@@ -13,22 +13,26 @@ internal let HEIGHT: CGFloat = 400
 @main
 struct Switcher: App {
     
-    private let listener: AudioHardwareListener
     @State private var service: AudioDeviceService
+    @State private var router = NavigationRouter()
     
     init() {
-        let listener = AudioHardwareListener()
-        self.listener = listener
         _service = State(
-            wrappedValue: AudioDeviceService(listener: listener)
+            wrappedValue: AudioDeviceService(listener: AudioHardwareListener())
         )
     }
     
     var body: some Scene {
         MenuBarExtra {
-            ContentView()
-                .frame(width: WIDTH, height: HEIGHT)
-                .environment(service)
+            NavigationStack(path: $router.paths) {
+                router.navigate(to: .home)
+                    .navigationDestination(for: Screen.self) { screen in
+                        router.navigate(to: screen)
+                    }
+            }
+            .frame(width: WIDTH, height: HEIGHT)
+            .environment(router)
+            .environment(service)
         } label: {
             Image(systemName: "headphones").imageScale(.large)
         }.menuBarExtraStyle(.window)
