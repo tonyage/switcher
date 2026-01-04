@@ -86,10 +86,7 @@ final class AudioDeviceService {
         )
     }
     
-    private func hasStream(
-        _ id: AudioDeviceID,
-        scope: AudioObjectPropertyScope
-    ) -> Bool {
+    private func hasStream(_ id: AudioDeviceID, scope: AudioObjectPropertyScope) -> Bool {
         var addr = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyStreams,
             mScope: scope,
@@ -193,40 +190,6 @@ final class AudioDeviceService {
         return volumes
     }
     
-    func setBalance(
-        _ balance: Float32,
-        on id: AudioObjectID
-    ) {
-        guard
-            let layout = channelLayout(id: id),
-            let frontChannels = frontChannels(layout: layout),
-            let leftChannel = frontChannels.left,
-            let rightChannel = frontChannels.right
-        else { return }
-        
-        let volumes = channelVolumes(id: id)
-        
-        guard
-            let leftBase = volumes[leftChannel],
-            let rightBase = volumes[rightChannel]
-        else { return }
-        
-        let clamped = max(-1, min(balance, 1))
-        let leftVol: Float32
-        let rightVol: Float32
-        
-        if clamped < 0 {
-            leftVol = leftBase
-            rightVol = rightBase * (1 + clamped)
-        } else {
-            leftVol = leftBase * (1 - clamped)
-            rightVol = rightBase
-        }
-        
-        setChannelVolume(leftVol, on: id, for: leftChannel)
-        setChannelVolume(rightVol, on: id, for: rightChannel)
-    }
-    
     private func setChannelVolume(_ volume: Float32, on id: AudioDeviceID, for channel: UInt32) {
         var volume = volume
         let size = UInt32(MemoryLayout.size(ofValue: volume))
@@ -309,7 +272,7 @@ final class AudioDeviceService {
     }
 }
 
-/// OUTPUT DEVICE FUNCTIONS
+/// OUTPUT & INPUT DEVICE FUNCTIONS
 extension AudioDeviceService {
     func getDevice(source: SourceType) -> AudioDeviceID? {
         func selectorType(_ source: SourceType) -> AudioObjectPropertySelector {
@@ -339,6 +302,37 @@ extension AudioDeviceService {
         return status == noErr ? id : nil
     }
     
+    func setBalance(_ balance: Float32, on id: AudioObjectID) {
+        guard
+            let layout = channelLayout(id: id),
+            let frontChannels = frontChannels(layout: layout),
+            let leftChannel = frontChannels.left,
+            let rightChannel = frontChannels.right
+        else { return }
+        
+        let volumes = channelVolumes(id: id)
+        
+        guard
+            let leftBase = volumes[leftChannel],
+            let rightBase = volumes[rightChannel]
+        else { return }
+        
+        let clamped = max(-1, min(balance, 1))
+        let leftVol: Float32
+        let rightVol: Float32
+        
+        if clamped < 0 {
+            leftVol = leftBase
+            rightVol = rightBase * (1 + clamped)
+        } else {
+            leftVol = leftBase * (1 - clamped)
+            rightVol = rightBase
+        }
+        
+        setChannelVolume(leftVol, on: id, for: leftChannel)
+        setChannelVolume(rightVol, on: id, for: rightChannel)
+    }
+
     func set(to id: AudioDeviceID, selector: AudioObjectPropertySelector) {
         var id = id
         let size = UInt32(MemoryLayout.size(ofValue: id))
@@ -348,7 +342,7 @@ extension AudioDeviceService {
             mElement: kAudioObjectPropertyElementMain
         )
         
-        _ = AudioObjectSetPropertyData(
+        AudioObjectSetPropertyData(
             AudioObjectID(kAudioObjectSystemObject),
             &addr,
             0,
@@ -421,6 +415,34 @@ extension AudioDeviceService {
             mScope: kAudioDevicePropertyScopeOutput,
             mElement: kAudioObjectPropertyElementMain
         )
-        _ = AudioObjectSetPropertyData(id, &addr, 0, nil, size, &muted)
+        AudioObjectSetPropertyData(id, &addr, 0, nil, size, &muted)
+    }
+    
+    func rms(from buffer: UnsafePointer<Float32>, count: Int) -> Float32 {
+        var sum: Float32 = 0
+        for i in 0..<count {
+            sum += buffer[i] * buffer[i]
+        }
+        return sqrt(sum / Float(count))
+    }
+    
+    func inputGain(deviceID: AudioDeviceID) -> Float32? {
+        var gain: Float32 = 0
+        var size = UInt32(MemoryLayout<Float32>.size)
+
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyVolumeScalar,
+            mScope: kAudioDevicePropertyScopeInput,
+            mElement: kAudioObjectPropertyElementMain
+        )
+
+        return AudioObjectGetPropertyData(
+            deviceID,
+            &address,
+            0,
+            nil,
+            &size,
+            &gain
+        ) == noErr ? gain : nil
     }
 }
