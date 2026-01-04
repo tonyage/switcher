@@ -7,7 +7,6 @@
 
 import Combine
 import CoreAudio
-import ServiceManagement
 import SwiftUI
 
 enum SourceType: String, CaseIterable, Identifiable, Hashable {
@@ -17,8 +16,23 @@ enum SourceType: String, CaseIterable, Identifiable, Hashable {
 }
 
 struct ContentView: View {
-    @State private var source: SourceType = .Output
     @Environment(AudioDeviceService.self) private var service
+    @Environment(NavigationRouter.self) private var router
+    @State private var source: SourceType = .Output
+
+    @ViewBuilder
+    private var appHeader: some View {
+        HStack {
+            Text("switcher")
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Spacer()
+            Button { router.push(.settings) } label: {
+                Image(systemName: "gearshape").imageScale(.medium)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 8)
+    }
     
     @ViewBuilder
     private var devices: some View {
@@ -35,14 +49,12 @@ struct ContentView: View {
     
     var body: some View {
         VStack {
-            Text("switcher")
-                .bold()
-                .padding(.horizontal, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            appHeader
             devices
             SoundManagement(source: $source)
             About()
         }
+        .background(.clear)
         .scenePadding()
     }
 }
@@ -84,73 +96,7 @@ fileprivate struct About: View {
             Spacer()
             Text(version).font(.footnote).foregroundStyle(.secondary)
         }
-        .padding(.vertical, 1)
-        .padding(.horizontal, 1)
-    }
-}
-
-fileprivate struct SecondaryDevices: View {
-    @Environment(AudioDeviceService.self) private var service
-    @State private var devices: [Device]
-    @State private var currentDevice: Device.ID?
-    let selector: AudioObjectPropertySelector
-    @State private var cancellables = Set<AnyCancellable>()
-    
-    @Binding var source: SourceType
-
-    @ViewBuilder
-    private var headerView: some View {
-        SourcePicker(source: $source)
-            .padding(10)
-            .background(.ultraThinMaterial)
-    }
-
-    @ViewBuilder
-    private var sectionHeaderRow: some View {
-        HStack {
-            Text("Name")
-                .font(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Text("Type")
-                .font(.subheadline)
-                .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .padding(8)
-        .background(Color.primary.opacity(0.3))
-    }
-
-    @ViewBuilder
-    private func deviceRow() -> some View {
-        ForEach(devices.indices, id: \.self) { index in
-            DeviceRow(
-                device: devices[index],
-                isSelected: devices[index].id == currentDevice,
-                onSelect: {
-                    service.set(to: devices[index].id, selector: selector)
-                }
-            )
-            .background(
-                Rectangle()
-                    .fill(
-                        index % 2 == 0
-                        ? .black.opacity(0.3)
-                        : .primary.opacity(0.3)
-                    )
-            )
-        }
-    }
-
-    var body: some View {
-        ScrollView {
-            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                Section(header: headerView) {
-                    sectionHeaderRow
-                    deviceRow()
-                }
-            }
-        }
-        .clipShape(RoundedRectangle(cornerRadius: 16))
-        .background(RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.3)))
+        .padding(.horizontal, 8)
     }
 }
 
@@ -163,8 +109,6 @@ fileprivate struct Devices: View {
             ? service.currentOutputDevice
             : service.currentInputDevice
     }
-    
-    @State private var cancellables = Set<AnyCancellable>()
     
     @Binding var source: SourceType
 
@@ -358,7 +302,14 @@ fileprivate struct InputLevel: View {
 }
 
 #Preview("Devices") {
-    ContentView().frame(width: WIDTH, height: HEIGHT).environment(
-        AudioDeviceService(listener: AudioHardwareListener())
-    )
+    @State @Previewable var router = NavigationRouter()
+    NavigationStack(path: $router.paths) {
+        router.navigate(to: .home)
+            .navigationDestination(for: Screen.self) { screen in
+                router.navigate(to: screen)
+            }
+    }
+    .frame(width: WIDTH, height: HEIGHT)
+    .environment(router)
+    .environment(AudioDeviceService(listener: AudioHardwareListener()))
 }
