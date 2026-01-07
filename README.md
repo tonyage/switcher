@@ -1,6 +1,8 @@
 # switcher
 
-![screenshot1](./image.png)
+![screenshot1](./output.png)
+![screenshot2](./input.png)
+![screenshot3](./settings.png)
 
 Menubar app to manage audio inputs/outputs on the fly without having to
 go into settings menu and reflects current device state if changed from
@@ -23,11 +25,6 @@ and prompts user to add it as a startup item, some things to look into later:
 ```bash
 # from the root directory build and sign the app via the following commands
 xcodebuild -configuration Release -scheme switcher
-codesign  --timestamp \
-          --options runtime \
-          --sign "Developer ID Application: Your Name" \
-          --deep \
-          "build/Release/switcher.app"
 
 # misc helper commands
 xcodebuild -configuration Release -list
