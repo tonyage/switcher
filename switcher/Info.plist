@@ -5,6 +5,8 @@
 	<key>LSUIElement</key>
 	<true/>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>This app needs permission to control other apps in order to switch audio devices.</string>
+	<string></string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app needs microphone access to display input levels.</string>
 </dict>
 </plist>
