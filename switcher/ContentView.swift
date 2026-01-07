@@ -192,16 +192,12 @@ fileprivate struct DeviceRow: View {
     }
 }
 
-/// TODO: hook up sliders for channel balance and input gain, only mute and volume work currently
-/// service currently has no logic for retrieving and setting channel balance values and
-/// reading input gain.
 fileprivate struct SoundManagement: View {
     @Environment(AudioDeviceService.self) private var service
     @Binding var source: SourceType
     @State private var volume: Float32 = 0.5
     @State private var muted: Bool = false
     @State private var balance: Float32 = 0.0
-    @State private var isEditing: Bool = false
 
     @ViewBuilder
     private var volumeSlider: some View {
@@ -213,11 +209,10 @@ fileprivate struct SoundManagement: View {
             Slider(
                 value: $volume,
                 in: 0...1.0,
-                onEditingChanged: { editing in
-                    isEditing = editing
-                    service.setVolume(volume, on: device)
-                }
             )
+            .onChange(of: volume) {
+                service.setVolume(volume, on: device)
+            }
             .disabled(muted)
             Image(systemName: "speaker.wave.3.fill")
         }
@@ -229,18 +224,29 @@ fileprivate struct SoundManagement: View {
     @ViewBuilder
     private var balanceSlider: some View {
         let device = service.currentOutputDevice!
-        HStack {
+        HStack(alignment: .top) {
             Text("Balance")
             Spacer(minLength: 145)
-            Slider(
-                value: $balance,
-                in: 0...2,
-                step: 0.5,
-                onEditingChanged: { editing in
-                    isEditing = editing
-                    service.setBalance(balance, on: device)
+            VStack(spacing: 0) {
+                Slider(value: $balance, in: -1...1)
+                    .onChange(of: balance) {
+                        // Snap to center when close
+                        if abs(balance) < 0.05 && balance != 0 {
+                            balance = 0
+                        }
+                        service.setBalance(balance, on: device)
+                    }
+                Circle()
+                    .fill(.secondary)
+                    .frame(width: 4, height: 4)
+                HStack {
+                    Text("Left")
+                    Spacer()
+                    Text("Right")
                 }
-            )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
         }
     }
 
@@ -250,7 +256,7 @@ fileprivate struct SoundManagement: View {
             HStack {
                 Text("Input Level")
                 Spacer(minLength: 90)
-                InputLevel(level: 2.0)
+                InputLevel(level: service.inputLevel)
             }
         }
     }
@@ -270,6 +276,19 @@ fileprivate struct SoundManagement: View {
             if let sysVolume = service.volume() {
                 volume = sysVolume
             }
+            if let device {
+                balance = service.getBalance(on: device)
+            }
+        }
+        .onChange(of: source) { _, newValue in
+            if newValue == .Input {
+                service.startInputMonitoring()
+            } else {
+                service.stopInputMonitoring()
+            }
+        }
+        .onDisappear {
+            service.stopInputMonitoring()
         }
         .padding()
         .background(
@@ -279,7 +298,7 @@ fileprivate struct SoundManagement: View {
 }
 
 fileprivate struct InputLevel: View {
-    var level: Double
+    var level: Float32
     private let count = 15
     private let width: CGFloat = 6
     private let height: CGFloat = 14
@@ -291,7 +310,7 @@ fileprivate struct InputLevel: View {
                 Capsule()
                     .frame(width: width, height: height)
                     .foregroundStyle(
-                        idx < Int(level * Double(count))
+                        idx < Int(level * Float32(count))
                         ? .gray
                         : .gray.opacity(0.15)
                     )

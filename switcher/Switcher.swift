@@ -8,7 +8,7 @@
 import SwiftUI
 
 internal let WIDTH: CGFloat = 460
-internal let HEIGHT: CGFloat = 400
+internal let HEIGHT: CGFloat = 460
 
 @main
 struct Switcher: App {
