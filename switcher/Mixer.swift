@@ -14,6 +14,7 @@ import os.log
 private let mixerLog = Logger(subsystem: "com.tonyage.switcher", category: "mixer")
 private let volumesKey = "mixerVolumes"
 private let heardKey = "mixerHeardChannels"
+private let routesKey = "mixerRoutes"
 
 private let responsibilityLookup: (@convention(c) (pid_t) -> pid_t)? = {
     guard let symbol = dlsym(
@@ -77,6 +78,9 @@ private let knownChannels = [
 final class MixerService {
     private(set) var apps: [MixerApp] = []
     private(set) var volumes: [String: Float32] = [:]
+    /// Channel id -> UID of the output device it's routed to. UIDs stay stable
+    /// across reconnects and reboots, unlike `AudioDeviceID`s.
+    private(set) var routes: [String: String] = [:]
 
     private let listener: AudioHardwareListener
     private var taps: [String: ProcessTap] = [:]
@@ -93,6 +97,7 @@ final class MixerService {
             volumes = stored
         }
         heard = Set(defaults.stringArray(forKey: heardKey) ?? [])
+        routes = defaults.dictionary(forKey: routesKey) as? [String: String] ?? [:]
         refresh()
         registerListeners()
         startPolling()
@@ -110,12 +115,37 @@ final class MixerService {
         reconcileTap(for: app)
     }
 
+    /// UID of the device this channel is routed to, or nil for the system default.
+    func outputDeviceUID(for app: MixerApp) -> String? {
+        routes[app.id]
+    }
+
+    func setOutputDevice(uid: String?, for app: MixerApp) {
+        routes[app.id] = uid
+        defaults.set(routes, forKey: routesKey)
+        mixerLog.debug("Routed \(app.id, privacy: .public) to \(uid ?? "default", privacy: .public)")
+        reconcileTap(for: app)
+    }
+
+    /// UID for a device, for matching rows in the device list against routes.
+    func uid(of device: AudioDeviceID) -> String? {
+        deviceUID(device)
+    }
+
     private func registerListeners() {
         listener.onProcessesChanged = { [weak self] in
             Task { @MainActor in self?.refresh() }
         }
         listener.onDeviceChanged = { [weak self] in
             Task { @MainActor in self?.rebuildTaps() }
+        }
+        // A routed device was plugged in or removed: move channels onto it or
+        // back to the default.
+        listener.onDevicesChanged = { [weak self] in
+            Task { @MainActor in
+                guard let self else { return }
+                self.apps.forEach(self.reconcileTap(for:))
+            }
         }
         listener.start()
     }
@@ -170,9 +200,10 @@ final class MixerService {
         }
 
         // Only channels that output sound (or are known to), plus any that were
-        // turned down so they can always be turned back up.
+        // turned down or rerouted so they can always be reset.
         let visible = channels.filter { id, entry in
-            heard.contains(id) || volumes[id] != nil || knownChannels[entry.role] != nil
+            heard.contains(id) || volumes[id] != nil || routes[id] != nil
+                || knownChannels[entry.role] != nil
         }
         let channelCounts = Dictionary(grouping: visible.values, by: \.appID).mapValues(\.count)
         let rows = visible
@@ -221,13 +252,20 @@ final class MixerService {
         apps.forEach(reconcileTap(for:))
     }
 
+    /// A channel needs a tap when it's turned down or routed to a connected device
+    /// other than the default; otherwise it plays untouched.
     private func reconcileTap(for app: MixerApp) {
-        guard let volume = volumes[app.id] else {
+        let volume = volumes[app.id] ?? 1
+        let defaultUID = defaultOutputUID()
+        let routedUID = routes[app.id].flatMap { isConnected($0) ? $0 : nil }
+        let rerouted = routedUID != nil && routedUID != defaultUID
+
+        guard volume < 1 || rerouted else {
             taps.removeValue(forKey: app.id)?.invalidate()
             return
         }
-        guard let outputUID = defaultOutputUID() else {
-            mixerLog.error("No default output device, can't tap \(app.id, privacy: .public)")
+        guard let outputUID = rerouted ? routedUID : defaultUID else {
+            mixerLog.error("No output device, can't tap \(app.id, privacy: .public)")
             return
         }
 
@@ -246,7 +284,7 @@ final class MixerService {
             gain: volume
         )
         if taps[app.id] != nil {
-            mixerLog.info("Tapped \(app.id, privacy: .public) processes \(app.processes, privacy: .public) on \(outputUID, privacy: .public)")
+            mixerLog.info("Tapped \(app.id, privacy: .public) processes \(app.processes, privacy: .public) on \(outputUID, privacy: .public), buffer \(self.taps[app.id]?.bufferFrames ?? 0) frames")
         }
     }
 }
@@ -359,10 +397,36 @@ private extension MixerService {
         guard AudioObjectGetPropertyData(
             AudioObjectID(kAudioObjectSystemObject), &address, 0, nil, &size, &device
         ) == noErr else { return nil }
+        return deviceUID(device)
+    }
 
-        address.mSelector = kAudioDevicePropertyDeviceUID
+    /// Whether a device with this UID is currently connected.
+    func isConnected(_ uid: String) -> Bool {
+        var device = AudioDeviceID(kAudioObjectUnknown)
+        var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+        var cfUID = uid as CFString
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioHardwarePropertyTranslateUIDToDevice,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        let status = withUnsafePointer(to: &cfUID) { qualifier in
+            AudioObjectGetPropertyData(
+                AudioObjectID(kAudioObjectSystemObject), &address,
+                UInt32(MemoryLayout<CFString>.size), qualifier, &size, &device
+            )
+        }
+        return status == noErr && device != kAudioObjectUnknown
+    }
+
+    func deviceUID(_ device: AudioDeviceID) -> String? {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyDeviceUID,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
         var unmanaged: Unmanaged<CFString>?
-        size = UInt32(MemoryLayout.size(ofValue: unmanaged))
+        var size = UInt32(MemoryLayout.size(ofValue: unmanaged))
         let result = withUnsafeMutablePointer(to: &unmanaged) { ptr -> OSStatus in
             AudioObjectGetPropertyData(device, &address, 0, nil, &size, ptr)
         }
@@ -402,6 +466,14 @@ private final class Gain: Sendable {
 final class ProcessTap: @unchecked Sendable {
     let processes: [AudioObjectID]
     let outputUID: String
+    /// IO buffer size actually in use on the aggregate device.
+    private(set) var bufferFrames: UInt32 = 0
+
+    /// 128 frames is ~2.7 ms at 48 kHz versus the usual 512 (~10.7 ms), which is
+    /// most of the delay a tap adds. The HAL runs a hardware device at the smallest
+    /// size any client asks for, so the output device runs at this size too while
+    /// a tap is active.
+    static let preferredBufferFrames: UInt32 = 128
 
     private let gainBox: Gain
     private var tapID = AudioObjectID(kAudioObjectUnknown)
@@ -461,6 +533,7 @@ final class ProcessTap: @unchecked Sendable {
             AudioHardwareCreateAggregateDevice(aggregate as CFDictionary, &aggregateID),
             "create aggregate device"
         )
+        bufferFrames = setBufferFrameSize(ProcessTap.preferredBufferFrames)
 
         let gain = gainBox
         try check(
@@ -492,6 +565,33 @@ final class ProcessTap: @unchecked Sendable {
         procID = nil
         aggregateID = AudioObjectID(kAudioObjectUnknown)
         tapID = AudioObjectID(kAudioObjectUnknown)
+    }
+
+    /// Requests `frames` (clamped to the device's supported range) and returns the
+    /// size the device actually settled on.
+    private func setBufferFrameSize(_ frames: UInt32) -> UInt32 {
+        var address = AudioObjectPropertyAddress(
+            mSelector: kAudioDevicePropertyBufferFrameSizeRange,
+            mScope: kAudioObjectPropertyScopeGlobal,
+            mElement: kAudioObjectPropertyElementMain
+        )
+        var range = AudioValueRange()
+        var size = UInt32(MemoryLayout<AudioValueRange>.size)
+        var requested = frames
+        if AudioObjectGetPropertyData(aggregateID, &address, 0, nil, &size, &range) == noErr {
+            requested = UInt32(max(range.mMinimum, min(Double(frames), range.mMaximum)))
+        }
+
+        address.mSelector = kAudioDevicePropertyBufferFrameSize
+        size = UInt32(MemoryLayout<UInt32>.size)
+        let status = AudioObjectSetPropertyData(aggregateID, &address, 0, nil, size, &requested)
+        if status != noErr {
+            mixerLog.error("Couldn't set buffer size to \(requested) (\(status))")
+        }
+
+        var actual: UInt32 = 0
+        AudioObjectGetPropertyData(aggregateID, &address, 0, nil, &size, &actual)
+        return actual
     }
 
     private func tapFormat() -> AudioStreamBasicDescription? {

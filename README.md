@@ -21,7 +21,8 @@ and prompts user to add it as a startup item, some things to look into later:
   (macOS 14.2+) and needs the "System Audio Recording" permission. Only apps
   that have played sound (remembered across launches) are listed, split into
   channels when an app plays from more than one process (e.g. Discord voice
-  chat vs notifications). Helper processes
+  chat vs notifications). Tap a row to route that channel to a different output
+  device; it falls back to the system default while that device is unplugged. Helper processes
   (e.g. Safari's WebKit GPU process) are attributed to their app via the private
   `responsibility_get_pid_responsible_for_pid` call.
 

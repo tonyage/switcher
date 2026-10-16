@@ -258,56 +258,130 @@ fileprivate struct Mixer: View {
 
 fileprivate struct MixerRow: View {
     @Environment(MixerService.self) private var mixer
+    @Environment(AudioDeviceService.self) private var service
     let app: MixerApp
     @State private var volume: Float32 = 1
+    @State private var expanded = false
     @AppStorage(playVolumeFeedbackKey) private var playFeedback = false
 
-    var body: some View {
-        HStack {
-            HStack(spacing: 6) {
-                Image(nsImage: NSWorkspace.shared.icon(forFile: app.bundleURL.path))
-                    .resizable()
-                    .frame(width: 18, height: 18)
-                VStack(alignment: .leading, spacing: 0) {
-                    Text(app.name)
-                    if let channel = app.channel {
-                        Text(channel)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                .lineLimit(1)
-                .truncationMode(.tail)
-                if app.isPlaying {
-                    Image(systemName: "waveform")
-                        .imageScale(.small)
+    private var devices: [Device] { service.outputDevices.sortedByType() }
+
+    private var outputUID: Binding<String?> {
+        Binding(
+            get: { mixer.outputDeviceUID(for: app) },
+            set: { mixer.setOutputDevice(uid: $0, for: app) }
+        )
+    }
+
+    /// Name of the device this channel is routed to, shown while collapsed.
+    private var routedDeviceName: String? {
+        guard let uid = mixer.outputDeviceUID(for: app) else { return nil }
+        return devices.first { mixer.uid(of: $0.id) == uid }?.name ?? "Disconnected device"
+    }
+
+    @ViewBuilder
+    private var label: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "chevron.right")
+                .imageScale(.small)
+                .foregroundStyle(.secondary)
+                .rotationEffect(.degrees(expanded ? 90 : 0))
+            Image(nsImage: NSWorkspace.shared.icon(forFile: app.bundleURL.path))
+                .resizable()
+                .frame(width: 18, height: 18)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(app.name)
+                if let channel = app.channel {
+                    Text(channel)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .help("Playing audio")
+                }
+                if !expanded, let routedDeviceName {
+                    Label(routedDeviceName, systemImage: "hifispeaker")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            HStack(spacing: 6) {
-                Slider(value: $volume, in: 0...1) { editing in
-                    if !editing && playFeedback {
-                        VolumeFeedback.play(at: volume)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            if app.isPlaying {
+                Image(systemName: "waveform")
+                    .imageScale(.small)
+                    .foregroundStyle(.secondary)
+                    .help("Playing audio")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(.rect)
+        .onTapGesture {
+            withAnimation(.easeInOut(duration: 0.15)) { expanded.toggle() }
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(expanded ? "Hides output options" : "Shows output options")
+    }
+
+    @ViewBuilder
+    private var slider: some View {
+        HStack(spacing: 6) {
+            Slider(value: $volume, in: 0...1) { editing in
+                if !editing && playFeedback {
+                    VolumeFeedback.play(at: volume)
+                }
+            }
+            .onChange(of: volume) {
+                mixer.setVolume(volume, for: app)
+            }
+            .accessibilityLabel([app.name, app.channel].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityValue("\(Int((volume * 100).rounded())) percent")
+            Text("\(Int((volume * 100).rounded()))%")
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .trailing)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var outputPicker: some View {
+        HStack {
+            Text("Output")
+                .foregroundStyle(.secondary)
+            Spacer()
+            Picker("Output", selection: outputUID) {
+                Text("System default").tag(String?.none)
+                Divider()
+                ForEach(devices) { device in
+                    if let uid = mixer.uid(of: device.id) {
+                        Text(device.name).tag(Optional(uid))
                     }
                 }
-                .onChange(of: volume) {
-                    mixer.setVolume(volume, for: app)
+                // Keep a saved route selectable while its device is unplugged.
+                if let uid = mixer.outputDeviceUID(for: app),
+                   !devices.contains(where: { mixer.uid(of: $0.id) == uid }) {
+                    Text("Disconnected device").tag(Optional(uid))
                 }
-                Text("\(Int((volume * 100).rounded()))%")
-                    .font(.caption)
-                    .monospacedDigit()
-                    .foregroundStyle(.secondary)
-                    .frame(width: 34, alignment: .trailing)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .fixedSize()
+        }
+        .padding(.leading, 26)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                label
+                slider
+            }
+            if expanded {
+                outputPicker
+            }
         }
         .padding(8)
         .task(id: app.id) { volume = mixer.volume(for: app) }
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel([app.name, app.channel].compactMap { $0 }.joined(separator: ", "))
-        .accessibilityValue("\(Int((volume * 100).rounded())) percent")
     }
 }
 

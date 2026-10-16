@@ -129,6 +129,21 @@ struct MixerServiceTests {
         #expect(await mixer.volume(for: app) == 0.25)
     }
 
+    @Test("Saves and restores a channel's output device")
+    func restoresRoutes() async {
+        let store = defaults()
+        let mixer = await MixerService(listener: AudioHardwareListener(), defaults: store)
+        #expect(await mixer.outputDeviceUID(for: app) == nil)
+
+        // A UID that isn't connected, so no tap is created.
+        await mixer.setOutputDevice(uid: "switcher.tests.missing-device", for: app)
+        let restored = await MixerService(listener: AudioHardwareListener(), defaults: store)
+        #expect(await restored.outputDeviceUID(for: app) == "switcher.tests.missing-device")
+
+        await restored.setOutputDevice(uid: nil, for: app)
+        #expect(await restored.outputDeviceUID(for: app) == nil)
+    }
+
     @Test("Discovered apps exclude switcher itself")
     func excludesSelf() async {
         let mixer = await MixerService(listener: AudioHardwareListener(), defaults: defaults())
