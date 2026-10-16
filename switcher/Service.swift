@@ -17,6 +17,21 @@ struct Device: Identifiable, Hashable {
     let isInput: Bool
 }
 
+extension [Device] {
+    /// Groups devices by transport type (alphabetically, unknown "-" last), then
+    /// by name, so e.g. all USB devices sit together.
+    func sortedByType() -> [Device] {
+        sorted {
+            let lhsUnknown = $0.transport == "-"
+            let rhsUnknown = $1.transport == "-"
+            if lhsUnknown != rhsUnknown { return rhsUnknown }
+            let byType = $0.transport.localizedCaseInsensitiveCompare($1.transport)
+            if byType != .orderedSame { return byType == .orderedAscending }
+            return $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class AudioDeviceService {
@@ -372,6 +387,14 @@ extension AudioDeviceService {
         return status == noErr ? id : nil
     }
     
+    /// Whether balance can be adjusted: the device needs separately controllable left
+    /// and right channel volumes (e.g. not mono built-in speakers with only a master).
+    func supportsBalance(on id: AudioObjectID) -> Bool {
+        guard let channels = stereoChannels(id: id) else { return false }
+        return channelVolume(id: id, channel: channels.left) != nil
+            && channelVolume(id: id, channel: channels.right) != nil
+    }
+
     /// Gets the current balance for a device as a value from -1 (full left) to +1 (full right).
     /// Returns 0 (center) if the device doesn't support stereo or volumes can't be read.
     func getBalance(on id: AudioObjectID) -> Float32 {

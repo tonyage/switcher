@@ -12,6 +12,7 @@ import SwiftUI
 enum SourceType: String, CaseIterable, Identifiable, Hashable {
     case Output
     case Input
+    case Mixer
     var id: Self { self }
 }
 
@@ -38,7 +39,7 @@ struct ContentView: View {
     private var devices: some View {
         Devices(
             devices: source == .Output
-                ? service.outputDevices
+                ? service.outputDevices.sortedByType()
                 : service.inputDevices,
             selector: source == .Output
                 ? kAudioHardwarePropertyDefaultOutputDevice
@@ -50,7 +51,10 @@ struct ContentView: View {
     var body: some View {
         VStack {
             appHeader
-            devices
+            switch source {
+                case .Mixer: Mixer(source: $source)
+                default: devices
+            }
             SoundManagement(source: $source)
             About()
         }
@@ -84,6 +88,16 @@ fileprivate struct SourcePicker: View {
     }
 }
 
+fileprivate extension View {
+    /// Reports the pinned header's height so the list can keep its scroll
+    /// indicator from overlapping it.
+    func stickyHeader(height: Binding<CGFloat>) -> some View {
+        onGeometryChange(for: CGFloat.self) { $0.size.height } action: {
+            height.wrappedValue = $0
+        }
+    }
+}
+
 fileprivate struct About: View {
     private var version: String {
         let dict = Bundle.main.infoDictionary
@@ -111,6 +125,7 @@ fileprivate struct Devices: View {
     }
     
     @Binding var source: SourceType
+    @State private var headerHeight: CGFloat = 0
 
     @ViewBuilder
     private var headerView: some View {
@@ -157,12 +172,14 @@ fileprivate struct Devices: View {
     var body: some View {
         ScrollView {
             LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
-                Section(header: headerView) {
+                Section(header: headerView.stickyHeader(height: $headerHeight)) {
                     sectionHeaderRow
                     deviceRow()
                 }
             }
         }
+        // Start the scroll indicator below the pinned header instead of over it.
+        .contentMargins(.top, headerHeight, for: .scrollIndicators)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .background(RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.3)))
     }
@@ -192,12 +209,115 @@ fileprivate struct DeviceRow: View {
     }
 }
 
+fileprivate struct Mixer: View {
+    @Environment(MixerService.self) private var mixer
+    @Binding var source: SourceType
+    @State private var headerHeight: CGFloat = 0
+
+    @ViewBuilder
+    private var headerView: some View {
+        SourcePicker(source: $source)
+            .padding(10)
+            .background(.ultraThinMaterial)
+    }
+
+    @ViewBuilder
+    private func appRows() -> some View {
+        if mixer.apps.isEmpty {
+            Text("No apps are playing audio")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(16)
+        }
+        ForEach(Array(mixer.apps.enumerated()), id: \.element.id) { index, app in
+            MixerRow(app: app)
+                .background(
+                    Rectangle()
+                        .fill(
+                            index % 2 == 0
+                            ? .black.opacity(0.3)
+                            : .primary.opacity(0.1)
+                        )
+                )
+        }
+    }
+
+    var body: some View {
+        ScrollView {
+            LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                Section(header: headerView.stickyHeader(height: $headerHeight)) {
+                    appRows()
+                }
+            }
+        }
+        .contentMargins(.top, headerHeight, for: .scrollIndicators)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .background(RoundedRectangle(cornerRadius: 16).fill(.black.opacity(0.3)))
+    }
+}
+
+fileprivate struct MixerRow: View {
+    @Environment(MixerService.self) private var mixer
+    let app: MixerApp
+    @State private var volume: Float32 = 1
+    @AppStorage(playVolumeFeedbackKey) private var playFeedback = false
+
+    var body: some View {
+        HStack {
+            HStack(spacing: 6) {
+                Image(nsImage: NSWorkspace.shared.icon(forFile: app.bundleURL.path))
+                    .resizable()
+                    .frame(width: 18, height: 18)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(app.name)
+                    if let channel = app.channel {
+                        Text(channel)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .lineLimit(1)
+                .truncationMode(.tail)
+                if app.isPlaying {
+                    Image(systemName: "waveform")
+                        .imageScale(.small)
+                        .foregroundStyle(.secondary)
+                        .help("Playing audio")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            HStack(spacing: 6) {
+                Slider(value: $volume, in: 0...1) { editing in
+                    if !editing && playFeedback {
+                        VolumeFeedback.play(at: volume)
+                    }
+                }
+                .onChange(of: volume) {
+                    mixer.setVolume(volume, for: app)
+                }
+                Text("\(Int((volume * 100).rounded()))%")
+                    .font(.caption)
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                    .frame(width: 34, alignment: .trailing)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .padding(8)
+        .task(id: app.id) { volume = mixer.volume(for: app) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel([app.name, app.channel].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityValue("\(Int((volume * 100).rounded())) percent")
+    }
+}
+
 fileprivate struct SoundManagement: View {
     @Environment(AudioDeviceService.self) private var service
     @Binding var source: SourceType
     @State private var volume: Float32 = 0.5
     @State private var muted: Bool = false
     @State private var balance: Float32 = 0.0
+    @AppStorage(playVolumeFeedbackKey) private var playFeedback = false
 
     @ViewBuilder
     private var volumeSlider: some View {
@@ -206,10 +326,13 @@ fileprivate struct SoundManagement: View {
             Text("Output Volume")
             Spacer(minLength: 100)
             Image(systemName: "speaker.fill")
-            Slider(
-                value: $volume,
-                in: 0...1.0,
-            )
+            Slider(value: $volume, in: 0...1.0) { editing in
+                // Full-scale blip: the device volume just set does the scaling,
+                // matching macOS's own feedback sound.
+                if !editing && playFeedback {
+                    VolumeFeedback.play(at: 1)
+                }
+            }
             .onChange(of: volume) {
                 service.setVolume(volume, on: device)
             }
@@ -270,6 +393,7 @@ fileprivate struct SoundManagement: View {
                     Divider()
                     balanceSlider
                 case .Input: inputLevel
+                case .Mixer: volumeSlider
             }
         }
         .task(id: device) {
@@ -331,4 +455,5 @@ fileprivate struct InputLevel: View {
     .frame(width: WIDTH, height: HEIGHT)
     .environment(router)
     .environment(AudioDeviceService(listener: AudioHardwareListener()))
+    .environment(MixerService(listener: AudioHardwareListener()))
 }

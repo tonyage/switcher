@@ -8,5 +8,7 @@
 	<string></string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>This app needs microphone access to display input levels.</string>
+	<key>NSAudioCaptureUsageDescription</key>
+	<string>This app needs system audio access to control the volume of individual apps.</string>
 </dict>
 </plist>

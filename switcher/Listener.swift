@@ -18,11 +18,13 @@ final class AudioHardwareListener {
     
     var onDevicesChanged: (() -> Void)?
     var onDeviceChanged: (() -> Void)?
+    var onProcessesChanged: (() -> Void)?
     
     private var selectors = [
         kAudioHardwarePropertyDevices,
         kAudioHardwarePropertyDefaultOutputDevice,
         kAudioHardwarePropertyDefaultInputDevice,
+        kAudioHardwarePropertyProcessObjectList,
     ]
     
     nonisolated let dispatchQueue = DispatchQueue(
@@ -35,6 +37,8 @@ final class AudioHardwareListener {
                 onDevicesChanged?()
             case kAudioHardwarePropertyDefaultOutputDevice, kAudioHardwarePropertyDefaultInputDevice:
                 onDeviceChanged?()
+            case kAudioHardwarePropertyProcessObjectList:
+                onProcessesChanged?()
             default:
                 break
         }

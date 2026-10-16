@@ -8,7 +8,21 @@
 @testable import switcher
 import Testing
 
-@Suite(.serialized)
+/// True when the current default output has separate left/right volume controls.
+/// Mono devices (e.g. Mac mini speakers) only expose a master volume, so balance
+/// can't be set and these tests would fail for reasons unrelated to the code.
+private func outputSupportsBalance() async -> Bool {
+    let service = await AudioDeviceService(listener: AudioHardwareListener())
+    guard let deviceId = await service.getDevice(source: .Output) else { return false }
+    return await service.supportsBalance(on: deviceId)
+}
+
+@Suite(
+    .serialized,
+    .enabled("Default output device has no separate left/right volume") {
+        await outputSupportsBalance()
+    }
+)
 struct BalanceTests {
     @Test("Balance is within valid range -1 to 1")
     func balanceRange() async throws {

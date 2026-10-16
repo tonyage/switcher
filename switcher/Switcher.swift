@@ -14,11 +14,15 @@ internal let HEIGHT: CGFloat = 460
 struct Switcher: App {
     
     @State private var service: AudioDeviceService
+    @State private var mixer: MixerService
     @State private var router = NavigationRouter()
     
     init() {
         _service = State(
             wrappedValue: AudioDeviceService(listener: AudioHardwareListener())
+        )
+        _mixer = State(
+            wrappedValue: MixerService(listener: AudioHardwareListener())
         )
     }
     
@@ -33,6 +37,7 @@ struct Switcher: App {
             .frame(width: WIDTH, height: HEIGHT)
             .environment(router)
             .environment(service)
+            .environment(mixer)
         } label: {
             Image(systemName: "headphones").imageScale(.large)
         }.menuBarExtraStyle(.window)

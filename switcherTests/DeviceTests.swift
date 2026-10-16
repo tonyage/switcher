@@ -44,4 +44,17 @@ struct DeviceTests {
         #expect(device1 != device3)
         #expect(device1.id == 100)
     }
+
+    @Test("Devices sort by type, then name, with unknown types last")
+    func sortedByType() {
+        let devices = [
+            Device(id: 1, name: "Studio Display", transport: "USB", isOutput: true, isInput: false),
+            Device(id: 2, name: "Mystery Box", transport: "-", isOutput: true, isInput: false),
+            Device(id: 3, name: "MacBook Speakers", transport: "Built-in", isOutput: true, isInput: false),
+            Device(id: 4, name: "AirPods", transport: "Bluetooth", isOutput: true, isInput: false),
+            Device(id: 5, name: "Kanto ORA", transport: "USB", isOutput: true, isInput: false),
+        ]
+
+        #expect(devices.sortedByType().map(\.id) == [4, 3, 5, 1, 2])
+    }
 }
