@@ -1,8 +1,9 @@
 # switcher
 
-![screenshot1](./output.png)
-![screenshot2](./input.png)
-![screenshot3](./settings.png)
+![screenshot1](./screenshots/output.png)
+![screenshot2](./screenshots/input.png)
+![screenshot3](./screenshots/mixer.png)
+![screenshot4](./screenshots/settings.png)
 
 Menubar app to manage audio inputs/outputs on the fly without having to
 go into settings menu and reflects current device state if changed from
