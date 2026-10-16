@@ -18,6 +18,8 @@ and prompts user to add it as a startup item, some things to look into later:
 - general testing of various devices (i.e, speakers that support surround
   sound (preliminary support is there, service class checks for channel
   layout of device).
+- TODO: a full desktop (windowed) version of the app for more advanced mixer
+  features that won't fit in the menubar popover.
 - per application volume (mixer tab) is built on Core Audio process taps
   (macOS 14.2+) and needs the "System Audio Recording" permission. Only apps
   that have played sound (remembered across launches) are listed, split into

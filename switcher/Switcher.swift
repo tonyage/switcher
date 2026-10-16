@@ -38,6 +38,14 @@ struct Switcher: App {
             .environment(router)
             .environment(service)
             .environment(mixer)
+            .onReceive(
+                NotificationCenter.default.publisher(for: NSWindow.didResignKeyNotification)
+            ) { _ in
+                guard !router.paths.isEmpty else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { router.popToRoot() }
+            }
         } label: {
             Image(systemName: "headphones").imageScale(.large)
         }.menuBarExtraStyle(.window)
