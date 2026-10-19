@@ -13,6 +13,7 @@ struct Settings: View {
     @State private var loginStatus: SMAppService.Status = SMAppService.mainApp.status
     @State private var loginError: String?
     @AppStorage(playVolumeFeedbackKey) private var playVolumeFeedback = false
+    @AppStorage(preventSleepKey) private var preventSleep = false
 
     /// Derived from the system's registration rather than stored separately so it
     /// can't drift: the menubar window keeps this view alive between openings and
@@ -77,6 +78,16 @@ struct Settings: View {
                         Toggle("Volume feedback", isOn: $playVolumeFeedback)
                             .toggleStyle(.switch)
                         Text("Play feedback when volume is changed")
+                    }
+                }
+                Section {
+                    VStack(alignment: .leading) {
+                        Toggle("Prevent sleep", isOn: $preventSleep)
+                            .toggleStyle(.switch)
+                            .onChange(of: preventSleep) { _, enabled in
+                                SleepGuard.setEnabled(enabled)
+                            }
+                        Text("Keep the Mac awake while switcher is running. The display can still turn off.")
                     }
                 }
             }

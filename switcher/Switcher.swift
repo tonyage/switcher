@@ -24,6 +24,7 @@ struct Switcher: App {
         _mixer = State(
             wrappedValue: MixerService(listener: AudioHardwareListener())
         )
+        SleepGuard.restore()
     }
     
     var body: some Scene {
