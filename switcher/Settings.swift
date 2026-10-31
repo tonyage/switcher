@@ -52,11 +52,12 @@ struct Settings: View {
             }
             .scenePadding(.top)
             .scenePadding(.horizontal)
-            Form {
-                Section {
-                    VStack(alignment: .leading) {
-                        Toggle("Launch on login", isOn: launchOnLogin)
-                            .toggleStyle(.switch)
+            // Cards instead of a grouped Form: on macOS the form draws its own light
+            // row backgrounds and ignores `listRowBackground`, so they couldn't
+            // match the darker panels on the main screen.
+            ScrollView {
+                VStack(spacing: 10) {
+                    SettingsCard("Launch on login", isOn: launchOnLogin) {
                         Text("When enabled, add switcher to the menu bar on user login.")
                         if loginStatus == .requiresApproval {
                             HStack {
@@ -72,27 +73,20 @@ struct Settings: View {
                             Text(loginError).foregroundStyle(.red)
                         }
                     }
-                }
-                Section {
-                    VStack(alignment: .leading) {
-                        Toggle("Volume feedback", isOn: $playVolumeFeedback)
-                            .toggleStyle(.switch)
+                    SettingsCard("Volume feedback", isOn: $playVolumeFeedback) {
                         Text("Play feedback when volume is changed")
                     }
-                }
-                Section {
-                    VStack(alignment: .leading) {
-                        Toggle("Prevent sleep", isOn: $preventSleep)
-                            .toggleStyle(.switch)
-                            .onChange(of: preventSleep) { _, enabled in
-                                SleepGuard.setEnabled(enabled)
-                            }
+                    SettingsCard("Prevent sleep", isOn: $preventSleep) {
                         Text("Keep the Mac awake while switcher is running. The display can still turn off.")
                     }
+                    .onChange(of: preventSleep) { _, enabled in
+                        SleepGuard.setEnabled(enabled)
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
             }
             .navigationBarBackButtonHidden()
-            .formStyle(.grouped)
             .onAppear(perform: refreshLoginStatus)
             .onReceive(
                 NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
@@ -101,6 +95,34 @@ struct Settings: View {
                 NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)
             ) { _ in refreshLoginStatus() }
         }
+    }
+}
+
+/// One toggle setting with its description, drawn like the panels on the main
+/// screen. The switch sits on the right at the mini size the grouped form used.
+fileprivate struct SettingsCard<Details: View>: View {
+    let title: String
+    @Binding var isOn: Bool
+    @ViewBuilder let details: Details
+
+    init(_ title: String, isOn: Binding<Bool>, @ViewBuilder details: () -> Details) {
+        self.title = title
+        self._isOn = isOn
+        self.details = details()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle(isOn: $isOn) {
+                Text(title).frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            details
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 10).fill(Color.black.opacity(0.3)))
     }
 }
 
